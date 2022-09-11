@@ -4,19 +4,54 @@ module ActiveRecord
   module Like
     module WhereChainExtensions
       def like(opts, *rest)
-        opts.each do |k,v|
+        opts.each do |k, v|
           if v.is_a?(Array) && v.empty?
             opts[k] = ''
           end
         end
+
+        # Add the wildcard character (%) to the start and end of all strings in opts
+        opts = opts.deep_transform_values { |v| v.empty? ? v : "%#{v}%" }
 
         chain_node(Arel::Nodes::Matches, opts, *rest) do |nodes|
           nodes.inject { |memo, node| Arel::Nodes::Or.new(memo, node) }
         end
       end
 
+      # Search fields using "ILIKE %#{search_term}%". If an array of values is provided, ensure
+      # that records match all of the values, rather than any of them, i.e. use AND rather than
+      # OR/IN. Useful so you don't have to chain like together multiple times,
+      # i.e. where.like().like().like()...
+      #
+      # @param opts [Object] the options of the where.like clause
+      # @return [Array<AR Objects>, Array<nil>]
+      #
+      # @example
+      # Job.where.like(title: ["Rails", "Vue", "Senior"])
+      # => Any jobs which have Rails, Vue OR Senior in the title.
+      #
+      # Job.where.all_like(title: ["Rails", "Vue", "Senior"])
+      # Job.like(title: "Rails").like(title: "Vue").like(title: "Senior") # Same as above
+      # => Jobs which have Rails, Vue, AND Senior in the title.
+      def all_like(opts, *rest)
+        opts.each do |k, v|
+          if v.is_a?(Array) && v.empty?
+            opts[k] = ''
+          end
+        end
+
+        # Add the wildcard character (%) to the start and end of all strings in opts
+        opts = opts.deep_transform_values { |v| v.empty? ? v : "%#{v}%" }
+
+        chain_node(Arel::Nodes::Matches, opts, *rest) { |nodes| Arel::Nodes::And.new(nodes) }
+      end
+
       def not_like(opts, *rest)
         opts = opts.reject { |_, v| v.is_a?(Array) && v.empty? }
+
+        # Add the wildcard character (%) to the start and end of all strings in opts
+        opts = opts.deep_transform_values { |v| v.empty? ? v : "%#{v}%" }
+
         chain_node(Arel::Nodes::DoesNotMatch, opts, *rest) do |nodes|
           Arel::Nodes::And.new(nodes)
         end
